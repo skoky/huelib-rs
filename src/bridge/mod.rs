@@ -1,13 +1,8 @@
-use crate::resource::{self, Creator, Modifier, RequestMethod, Scanner};
-use crate::{response::Modified, Response, Result};
+use std::{collections::HashMap, net::IpAddr};
+use std::time::Duration;
+
 use serde::de::DeserializeOwned;
 use serde_json::Value as JsonValue;
-use std::{collections::HashMap, net::IpAddr};
-
-#[cfg(feature = "upnp-description")]
-mod description;
-mod discover;
-mod register;
 
 #[cfg(feature = "upnp-description")]
 pub use description::{
@@ -15,6 +10,14 @@ pub use description::{
 };
 pub use discover::discover_nupnp;
 pub use register::{register_user, register_user_with_clientkey};
+
+use crate::{Response, response::Modified, Result};
+use crate::resource::{self, Creator, Modifier, RequestMethod, Scanner};
+
+#[cfg(feature = "upnp-description")]
+mod description;
+mod discover;
+mod register;
 
 type ResponsesModified = Vec<Response<Modified>>;
 
@@ -39,9 +42,38 @@ pub struct Bridge {
     ip_address: IpAddr,
     /// Url to the Philips Hue API.
     api_url: String,
+
+    /// connection timeout to connect to bridge
+    timeout: Duration,
 }
 
 impl Bridge {
+    /// Creates a new bridge with connection timeout.
+    ///
+    /// # Examples
+    ///
+    /// Create a bridge with an already registered user:
+    /// ```
+    /// use huelib::Bridge;
+    /// use std::net::{IpAddr, Ipv4Addr};
+    /// use std::time::Duration;
+    ///
+    /// let ip = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2));
+    /// let bridge = Bridge::new_with_timeout(ip, "username", Duration::from_secs(10));
+    /// ```
+    pub fn new_with_timeout<S>(ip_address: IpAddr, username: S, timeout: Duration) -> Self
+    where
+        S: Into<String>,
+    {
+        let username = username.into();
+        Bridge {
+            api_url: format!("http://{}/api/{}", ip_address, username),
+            username,
+            ip_address,
+            timeout,
+        }
+    }
+
     /// Creates a new bridge.
     ///
     /// # Examples
@@ -63,6 +95,7 @@ impl Bridge {
             api_url: format!("http://{}/api/{}", ip_address, username),
             username,
             ip_address,
+            timeout: Duration::from_secs(30)
         }
     }
 
@@ -93,7 +126,8 @@ impl Bridge {
             RequestMethod::Post => ureq::post(&url),
             RequestMethod::Get => ureq::get(&url),
             RequestMethod::Delete => ureq::delete(&url),
-        };
+        }.timeout(self.timeout);
+
         let response = match body {
             Some(v) => request.send_json(v)?,
             None => request.call()?,
